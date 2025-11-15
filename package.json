@@ -1,9 +1,12 @@
 {
-"name": "rpi-dyndns-proxy",
-"version": "1.0.0",
-"description": "Proxy to redirect to RPi's dynamic IP using ip.txt from Git",
-"main": "index.js",
-"scripts": {
-"start": "node index.js"
-}
+  "name": "rpi-dyndns-proxy",
+  "version": "1.0.0",
+  "description": "Proxy to redirect to RPi's dynamic IP using ip.txt from Git",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.0.0"
+  }
 }

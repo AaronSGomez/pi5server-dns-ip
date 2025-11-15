@@ -1,32 +1,34 @@
 // index.js (Corre en Vercel)
-// Lee el archivo ip.txt (que está en el mismo proyecto) y redirige a la IP de tu RPi.
+// Lee el archivo ip.txt directamente desde la URL RAW de GitHub (solución robusta).
 
-const fs = require('fs');
-const path = require('path');
+// Necesita la librería 'node-fetch' para hacer peticiones HTTP.
+const fetch = require('node-fetch');
 
-module.exports = (req, res) => {
+// URL RAW de tu archivo ip.txt en GitHub. 
+// ¡Asegúrate de que la URL sea la tuya, con tu usuario y repo!
+const GITHUB_RAW_IP_URL = "https://raw.githubusercontent.com/AaronSgomez/pi5server-dns-ip/main/ip.txt";
+
+module.exports = async (req, res) => {
     try {
-        // Lee el archivo ip.txt. Vercel lo incluye durante el deployment.
-        const ipFilePath = path.join(__dirname, 'ip.txt');
-        const ip = fs.readFileSync(ipFilePath, 'utf8').trim();
+        // 1. Petición HTTP directa a GitHub para obtener el contenido del archivo ip.txt
+        const response = await fetch(GITHUB_RAW_IP_URL);
         
-        if (!ip) {
+        if (!response.ok) {
             res.statusCode = 500;
-            res.end('Error: La IP no se pudo leer del archivo ip.txt.');
+            res.end(`Error: No se pudo obtener la IP de GitHub. Código: ${response.status}`);
             return;
         }
 
-        // Construye la URL de destino usando la IP y manteniendo la ruta
-        // Usamos HTTP por defecto para que funcione sin un certificado SSL en el router.
+        const ip = (await response.text()).trim();
+        
+        // 2. Construye la URL de destino
         const protocol = 'http'; 
-        const port = 80; // Puerto HTTP estándar. Si usas uno diferente, cámbialo aquí.
-                         // Si quieres acceder a tu BBDD, usarás un puerto diferente!
+        const port = 80; // Puerto HTTP. Si quieres acceder a tu BBDD, usarás un puerto diferente en Java.
 
         // Mantiene la ruta original (ej. /dashboard)
         const destination = `${protocol}://${ip}:${port}${req.url}`;
         
-        // Redirección 302 (Temporalmente Encontrado). Esto es lo que expone la IP 
-        // a tu navegador, pero te lleva a tu casa.
+        // 3. Redirección
         res.writeHead(302, {
             'Location': destination
         });
