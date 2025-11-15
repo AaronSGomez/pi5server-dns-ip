@@ -1,30 +1,54 @@
+# Archivo: wismyip_updater.py
+# Descripción: Detecta la IP pública, sincroniza el repositorio y la publica en GitHub (DynDNS).
+# Se ejecuta en la Raspberry Pi mediante Cron.
+
 import requests
 import subprocess 
-import sys # Añadimos sys para un exit más limpio en caso de fallo
+import sys 
+import os
+
+def ejecutar_comando_simple(comando, descripcion="Ejecutando comando Git"):
+    """Ejecuta un comando de sistema simple e imprime el resultado."""
+    print(f"--- {descripcion} ---")
+    try:
+        # Ejecuta el comando, lanza excepción si falla.
+        # Captura stdout y stderr
+        resultado = subprocess.run(comando, check=True, text=True, capture_output=True)
+        print(f"Comando '{' '.join(comando)}' completado con éxito.")
+        
+        # Imprime la salida si existe y no es el mensaje genérico de git
+        if resultado.stdout.strip() and "up-to-date" not in resultado.stdout:
+            print(f"  -> Salida: {resultado.stdout.strip()}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"⛔️ ERROR al ejecutar '{' '.join(comando)}':")
+        # Mostramos la salida de error de Git
+        print(e.stderr.strip())
+        return False
+    except FileNotFoundError:
+        print("⛔️ ERROR: Git no encontrado. Asegúrate de que Git esté instalado.")
+        return False
 
 def obtener_ip_publica():
-    """Detecta y devuelve la IP pública actual utilizando un servicio externo."""
+    """Detecta y devuelve la IP pública actual."""
     URL = "https://api.ipify.org"
     try:
-        respuesta = requests.get(URL, timeout=10) # Añadimos timeout para ser robustos
+        respuesta = requests.get(URL, timeout=10) 
         respuesta.raise_for_status() 
         ip_publica = respuesta.text.strip()
         return ip_publica
     except requests.RequestException as e:
         print(f"Error al obtener la IP pública: {e}")
         return None
-
-#Funcion que lee la ip guardada en el archivo ip.txt
+    
 def leer_ip_anterior(nombre_archivo="ip.txt"):
     """Lee y devuelve la IP guardada del archivo."""
     try:
         with open(nombre_archivo, 'r') as f:
             return f.readline().strip() 
     except FileNotFoundError:
-        # Devuelve "" si el archivo no existe
         return "" 
 
-#Funcion que guarda la nueva ip en el arhivo si cambio
 def escribir_ip_nueva(ip, nombre_archivo="ip.txt"):
     """Escribe la nueva IP en el archivo."""
     try:
@@ -34,65 +58,54 @@ def escribir_ip_nueva(ip, nombre_archivo="ip.txt"):
     except Exception as e:
         print(f"Error al escribir en el archivo {nombre_archivo}: {e}")
 
-#Ejecutamos los comandos git, para subir nuestra nueva ip al repositorio
 def ejecutar_comandos_git():
-    """Ejecuta los comandos Git necesarios para publicar el cambio de IP."""
+    """Ejecuta los comandos Git (add, commit, push) para publicar el cambio."""
     
-    # Lista de comandos a ejecutar
+    # Comandos para subir los cambios
     comandos = [
         ["git", "add", "ip.txt"],
-        # Si no hay cambios, 'git commit' fallará, pero el check=True
-        # es mejor dejarlo para detectar otros errores
         ["git", "commit", "-m", "Auto-update IP"],
-        ["git", "push", "origin", "main"] # Asume que tu rama principal es 'main'
+        ["git", "push", "origin", "master:main"] 
     ]
 
     for comando in comandos:
-        try:
-            # Ejecuta el comando. 'check=True' lanza un error si el comando falla.
-            # Agregamos stderr y stdout al output
-            resultado = subprocess.run(comando, check=True, text=True, capture_output=True)
-            print(f"Comando {' '.join(comando)} completado con éxito.")
-            # Imprime el output de Git
-            if resultado.stdout:
-                print(f"  -> {resultado.stdout.strip()}")
-            
-        except subprocess.CalledProcessError as e:
-            # Esto captura errores de Git (ej. no hay conexión o no hay 'origin')
-            print(f"⛔️ Error al ejecutar {' '.join(comando)}:")
-            print(e.stderr)
-            # Manejamos un caso especial: si commit no tiene nada que hacer
-            if "nothing to commit" in e.stderr:
-                print("⚠️ Git commit ejecutado sin cambios, continuando con push...")
-                continue # Pasa al siguiente comando (push)
-            return # Detiene la ejecución si hay un error de Git grave
-        except FileNotFoundError:
-            print("⛔️ ERROR: Git no encontrado. Asegúrate de que Git esté instalado.")
-            return
-            print("✅ ¡El repositorio remoto se ha actualizado con la nueva IP!")
+        if not ejecutar_comando_simple(comando, f"Ejecutando {comando[1]}"):
+            # Si el commit no tiene cambios, salimos limpiamente.
+            if comando[1] == "commit":
+                continue 
+            return 
 
-#Ejecucion de programa. comprobamos ip, verificamos con archivo y llamamos a git si cambio
+    print("✅ ¡El repositorio remoto se ha actualizado con la nueva IP!")
+
 def main():
+    # Asegura que el script se ejecute en su propio directorio (necesario para Cron)
+    try:
+        os.chdir(os.path.dirname(os.path.abspath(__file__))) 
+        print(f"Directorio actual: {os.getcwd()}")
+    except Exception as e:
+        print(f"Error al cambiar de directorio: {e}")
+        return
+
+    # PASO 1: SINCRONIZACIÓN (Solución al problema de edición manual)
+    # Descarga la última IP conocida desde GitHub para evitar re-subir la misma IP.
+    ejecutar_comando_simple(["git", "pull", "origin", "main"], "Sincronizando IP anterior desde GitHub")
+    
+    # PASO 2: Obtener las IPs
     ip_nueva = obtener_ip_publica() 
-    if ip_nueva:
-        ip_anterior = leer_ip_anterior()
+    if not ip_nueva:
+        return 
 
-        # Compara las IPs para determinar si se necesita la actualización de Git
-        if ip_nueva != ip_anterior:
-            print(f"IP ha cambiado: {ip_anterior} -> {ip_nueva}. ¡Iniciando actualización de Git!")
-            
-            # 1. Actualizar el archivo local
-            escribir_ip_nueva(ip_nueva)
-            
-            # 2. Ejecutar los comandos de Git
-            ejecutar_comandos_git() 
+    ip_anterior = leer_ip_anterior()
 
-        else:
-            print(f"La IP ({ip_nueva}) no ha cambiado. No se requiere actualización.")
+    # PASO 3: Comparar y Actualizar
+    if ip_nueva != ip_anterior:
+        print(f"IP ha cambiado: {ip_anterior} -> {ip_nueva}. ¡Iniciando actualización de Git!")
+        
+        escribir_ip_nueva(ip_nueva)
+        ejecutar_comandos_git() 
+
     else:
-        print("No se pudo obtener la IP pública. Saliendo...")
+        print(f"La IP ({ip_nueva}) no ha cambiado. No se requiere actualización.")
 
-
-# Punto de entrada del script, esto ejecuta esto en primer lugar
 if __name__ == "__main__":
     main()
